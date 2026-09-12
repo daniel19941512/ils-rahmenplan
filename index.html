@@ -337,7 +337,12 @@ function RahmenplanWerkstatt() {
   const [status, setStatus] = useState("Verbinde mit der Datenbank...");
   const [busy, setBusy] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const isFirstRender = useRef(true);
+  const dirtyRef = useRef(false);
+  const gridsRef = useRef(grids);
+  const erstellerRef = useRef(ersteller);
 
   const plan = PLANS[planKey];
   const grid = grids[planKey];
@@ -358,20 +363,31 @@ function RahmenplanWerkstatt() {
 
   useEffect(() => { refreshList(); }, [refreshList]);
 
+  // Referenzen aktuell halten, damit das Intervall unten immer den neuesten
+  // Stand sieht, ohne dass das Intervall selbst bei jeder Aenderung neu gestartet wird.
+  useEffect(() => { gridsRef.current = grids; erstellerRef.current = ersteller; }, [grids, ersteller]);
+
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
-    setAutoSaveStatus("Änderungen erkannt, speichere...");
-    const t = setTimeout(async () => {
+    dirtyRef.current = true;
+    setAutoSaveStatus("Ungespeicherte Änderungen (wird spätestens in 2 Min. automatisch gesichert)...");
+  }, [grids]);
+
+  // Echtes 120-Sekunden-Intervall, unabhaengig davon wie oft zwischendurch
+  // editiert wird - spart Schreibzugriffe im Vergleich zu "nach jeder Aenderung".
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (!dirtyRef.current) return;
       try {
-        await fsAutosave(ersteller, grids);
+        await fsAutosave(erstellerRef.current, gridsRef.current);
+        dirtyRef.current = false;
         setAutoSaveStatus(`Automatisch gespeichert um ${new Date().toLocaleTimeString("de-DE")}`);
       } catch (e) {
         setAutoSaveStatus("Autospeichern fehlgeschlagen: " + e.message);
       }
-    }, 2000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grids]);
+    }, 120000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadAutosave = async () => {
     setBusy(true);
@@ -486,13 +502,51 @@ function RahmenplanWerkstatt() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {draftList.map((d) => (
-                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0D1420", border: "1px solid #2A3446", borderRadius: 6, padding: "6px 10px" }}>
-                  <div style={{ flex: 1, fontSize: 12 }}>
-                    <span style={{ color: "#DCE7FF", fontWeight: 600 }}>{d.titel}</span>{" "}
-                    <span style={{ color: "#4C5A70" }}>· {d.ersteller} · {new Date(d.timestamp).toLocaleString("de-DE")}</span>
+                <div key={d.id} style={{ background: "#0D1420", border: "1px solid #2A3446", borderRadius: 6, padding: "6px 10px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, fontSize: 12 }}>
+                      <span style={{ color: "#DCE7FF", fontWeight: 600 }}>{d.titel}</span>{" "}
+                      <span style={{ color: "#4C5A70" }}>· {d.ersteller} · {new Date(d.timestamp).toLocaleString("de-DE")}</span>
+                    </div>
+                    <button onClick={() => openDraft(d)} disabled={busy} style={{ ...styles.btnPrimary, padding: "4px 14px", fontSize: 11 }}>Öffnen</button>
                   </div>
-                  <button onClick={() => openDraft(d)} disabled={busy} style={{ ...styles.btnPrimary, padding: "4px 10px", fontSize: 11 }}>Öffnen</button>
-                  <button onClick={() => removeDraft(d.id)} disabled={busy} style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid #3A2A2A", background: "#241717", color: "#E39C9C", fontSize: 11, cursor: "pointer" }}>Löschen</button>
+                  {/* Loeschen bewusst abgesetzt und unauffaellig - verhindert versehentliches Klicken */}
+                  <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1A2333", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6 }}>
+                    {deleteConfirmId === d.id ? (
+                      <>
+                        <span style={{ fontSize: 10, color: "#E39C9C" }}>Zum Bestätigen "LÖSCHEN" eintippen:</span>
+                        <input
+                          value={deleteConfirmText}
+                          onChange={(e) => setDeleteConfirmText(e.target.value)}
+                          placeholder="LÖSCHEN"
+                          style={{ width: 90, padding: "3px 6px", borderRadius: 4, border: "1px solid #3A2A2A", background: "#1A0F0F", color: "#E7ECF3", fontSize: 11 }}
+                        />
+                        <button
+                          onClick={() => { removeDraft(d.id); setDeleteConfirmId(null); setDeleteConfirmText(""); }}
+                          disabled={busy || deleteConfirmText !== "LÖSCHEN"}
+                          style={{ padding: "3px 10px", borderRadius: 4, border: "1px solid #3A2A2A",
+                            background: deleteConfirmText === "LÖSCHEN" ? "#5A1F1F" : "#241717",
+                            color: deleteConfirmText === "LÖSCHEN" ? "#FFD7D7" : "#6B4A4A",
+                            fontSize: 11, cursor: deleteConfirmText === "LÖSCHEN" ? "pointer" : "not-allowed" }}
+                        >
+                          Endgültig löschen
+                        </button>
+                        <button
+                          onClick={() => { setDeleteConfirmId(null); setDeleteConfirmText(""); }}
+                          style={{ padding: "3px 10px", borderRadius: 4, border: "1px solid #2A3446", background: "transparent", color: "#8B98AC", fontSize: 11, cursor: "pointer" }}
+                        >
+                          Abbrechen
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => { setDeleteConfirmId(d.id); setDeleteConfirmText(""); }}
+                        style={{ padding: "2px 8px", borderRadius: 4, border: "none", background: "transparent", color: "#4C5A70", fontSize: 10, cursor: "pointer", textDecoration: "underline" }}
+                      >
+                        löschen
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

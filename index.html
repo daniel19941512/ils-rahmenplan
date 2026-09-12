@@ -215,26 +215,33 @@ function computeCombinedCoverage(grids) {
 // ============================================================
 // Firestore Hilfsfunktionen (kein Login noetig - offener Zugriff)
 // ============================================================
+// Firestore unterstuetzt KEINE verschachtelten Arrays (Array von Arrays) -
+// deshalb werden die Tabellen als JSON-Text gespeichert und beim Laden
+// wieder in echte Arrays zurueckverwandelt.
+function docToEntry(data) {
+  return { ...data, grids: JSON.parse(data.gridsJson) };
+}
+
 async function fsListDrafts() {
   const snap = await db.collection(DRAFTS_COLLECTION).orderBy("timestamp", "desc").get();
   const out = [];
   snap.forEach((doc) => {
     if (doc.id === AUTOSAVE_DOC_ID) return;
-    out.push({ id: doc.id, ...doc.data() });
+    out.push({ id: doc.id, ersteller: doc.data().ersteller, titel: doc.data().titel, timestamp: doc.data().timestamp });
   });
   return out;
 }
 async function fsSaveNew(ersteller, titel, grids) {
-  const ref = await db.collection(DRAFTS_COLLECTION).add({ ersteller, titel, timestamp: Date.now(), grids });
+  const ref = await db.collection(DRAFTS_COLLECTION).add({ ersteller, titel, timestamp: Date.now(), gridsJson: JSON.stringify(grids) });
   return ref.id;
 }
 async function fsOverwrite(id, ersteller, titel, grids) {
-  await db.collection(DRAFTS_COLLECTION).doc(id).set({ ersteller, titel, timestamp: Date.now(), grids });
+  await db.collection(DRAFTS_COLLECTION).doc(id).set({ ersteller, titel, timestamp: Date.now(), gridsJson: JSON.stringify(grids) });
 }
 async function fsLoad(id) {
   const doc = await db.collection(DRAFTS_COLLECTION).doc(id).get();
   if (!doc.exists) throw new Error("nicht gefunden");
-  return doc.data();
+  return docToEntry(doc.data());
 }
 async function fsDelete(id) {
   await db.collection(DRAFTS_COLLECTION).doc(id).delete();
@@ -244,13 +251,13 @@ async function fsAutosave(ersteller, grids) {
     ersteller: ersteller || "(kein Name eingetragen)",
     titel: "Autospeicherung (zuletzt bearbeitet)",
     timestamp: Date.now(),
-    grids,
+    gridsJson: JSON.stringify(grids),
   });
 }
 async function fsLoadAutosave() {
   const doc = await db.collection(DRAFTS_COLLECTION).doc(AUTOSAVE_DOC_ID).get();
   if (!doc.exists) throw new Error("keine Autospeicherung vorhanden");
-  return doc.data();
+  return docToEntry(doc.data());
 }
 
 // ============================================================

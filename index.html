@@ -631,58 +631,85 @@ function RahmenplanWerkstatt() {
           <h3 style={{ fontSize: 15, margin: "0 0 4px 0", color: "#8B98AC" }}>Offene Dienste - über alle Rahmenpläne kombiniert</h3>
           <p style={{ fontSize: 13, color: "#4C5A70", margin: "0 0 10px 0" }}>
             Ein Dienst zählt als besetzt, egal in welchem Rahmenplan er eingetragen wurde. Format: vorhanden/benötigt.
-            "–" heißt: an dem Tag nicht relevant.
+            "–" heißt: an dem Tag nicht relevant. Wochenende gelb markiert.
           </p>
-          {["ungerade", "gerade"].map((parity) => (
-            <div key={parity} style={{ marginBottom: 18 }}>
-              <h4 style={{ fontSize: 14, margin: "0 0 8px 0", color: "#8B98AC" }}>{parity === "ungerade" ? "Ungerade" : "Gerade"} Kalenderwoche</h4>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: "6px 10px", color: "#8B98AC" }}>Kürzel</th>
-                      {WEEKDAY_NAMES.map((n) => <th key={n} style={{ padding: "6px 10px", color: "#8B98AC", minWidth: 74 }}>{n}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ALLE_KUERZEL_REIHENFOLGE.map((code) => {
-                      const dayEntries = combinedCoverage[parity];
-                      const relevantAny = dayEntries.some((e) => code in e.required);
-                      if (!relevantAny) return null;
-                      return (
-                        <tr key={code} style={{ borderTop: "1px solid #1A2333" }}>
-                          <td style={{ padding: "5px 10px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>{code}</td>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {["ungerade", "gerade"].map((parity) => {
+              const dayEntries = combinedCoverage[parity];
+              const spaltenSummen = dayEntries.map(({ day, counts }) => {
+                let sum = 0;
+                ALLE_KUERZEL_REIHENFOLGE.forEach((code) => { if (code in counts) sum += counts[code]; });
+                const reserveCode = day < 5 ? "ARL" : "AL";
+                if (reserveCode in counts) sum += counts[reserveCode];
+                return sum;
+              });
+              return (
+                <div key={parity}>
+                  <h4 style={{ fontSize: 14, margin: "0 0 8px 0", color: "#8B98AC" }}>{parity === "ungerade" ? "Ungerade" : "Gerade"} Kalenderwoche</h4>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: "left", padding: "6px 8px", color: "#8B98AC" }}>Kürzel</th>
+                          {WEEKDAY_NAMES.map((n, d) => (
+                            <th key={n} style={{ padding: "6px 6px", color: d >= 5 ? "#3A3418" : "#8B98AC",
+                              background: d >= 5 ? "#3A3418" : "transparent", minWidth: 58 }}>{n}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ALLE_KUERZEL_REIHENFOLGE.map((code) => {
+                          const relevantAny = dayEntries.some((e) => code in e.required);
+                          if (!relevantAny) return null;
+                          return (
+                            <tr key={code} style={{ borderTop: "1px solid #1A2333" }}>
+                              <td style={{ padding: "5px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>{code}</td>
+                              {dayEntries.map(({ day, required, counts }) => {
+                                const weekend = day >= 5;
+                                if (!(code in required)) {
+                                  return <td key={day} style={{ padding: "5px 6px", textAlign: "center", color: weekend ? "#5A5228" : "#3A4560", background: weekend ? "#211E10" : "transparent" }}>–</td>;
+                                }
+                                const have = counts[code], need = required[code], ok = have === need;
+                                return (
+                                  <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
+                                    color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
+                                    {have}/{need}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                        <tr style={{ borderTop: "1px solid #1A2333" }}>
+                          <td style={{ padding: "5px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>ARL/AL</td>
                           {dayEntries.map(({ day, required, counts }) => {
-                            if (!(code in required)) {
-                              return <td key={day} style={{ padding: "5px 10px", textAlign: "center", color: "#3A4560" }}>–</td>;
-                            }
+                            const weekend = day >= 5;
+                            const code = weekend ? "AL" : "ARL";
                             const have = counts[code], need = required[code], ok = have === need;
                             return (
-                              <td key={day} style={{ padding: "5px 10px", textAlign: "center", fontFamily: "monospace", color: ok ? "#8FE3A6" : "#F0A8A8" }}>
+                              <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
+                                color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
                                 {have}/{need}
                               </td>
                             );
                           })}
                         </tr>
-                      );
-                    })}
-                    <tr style={{ borderTop: "1px solid #1A2333" }}>
-                      <td style={{ padding: "5px 10px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>ARL/AL</td>
-                      {combinedCoverage[parity].map(({ day, required, counts }) => {
-                        const code = day < 5 ? "ARL" : "AL";
-                        const have = counts[code], need = required[code], ok = have === need;
-                        return (
-                          <td key={day} style={{ padding: "5px 10px", textAlign: "center", fontFamily: "monospace", color: ok ? "#8FE3A6" : "#F0A8A8" }}>
-                            {have}/{need}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+                        <tr style={{ borderTop: "2px solid #3A4560" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 700, color: "#DCE7FF" }}>Dienste gesamt</td>
+                          {spaltenSummen.map((sum, d) => (
+                            <td key={d} style={{ padding: "6px 6px", textAlign: "center", fontWeight: 700, color: "#DCE7FF",
+                              background: d >= 5 ? "#3A3418" : "transparent" }}>
+                              {sum}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div style={styles.panel}>

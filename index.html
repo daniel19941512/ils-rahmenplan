@@ -136,23 +136,55 @@ function emptyGrid(weeks) { return Array.from({ length: weeks }, () => Array(7).
 function codesForDay(plan, day) { return day < 5 ? plan.weekdayCodes : day === 5 ? plan.satCodes : plan.sunCodes; }
 function parityOf(r) { return r % 2 === 0 ? "ungerade" : "gerade"; }
 
-// Nur die an diesem Tag/dieser Paritaet tatsaechlich verfuegbaren/benoetigten
-// Kuerzel zur Auswahl anbieten - macht sofort sichtbar, welche Dienste an dem
-// Tag ueberhaupt sinnvoll sind (z.B. Schichtfuehrer-Dienste nur an SF-Tagen).
+// Nur die an diesem Tag/dieser Paritaet tatsaechlich noch VERFUEGBAREN Kuerzel
+// zur Auswahl anbieten: sowohl grundsaetzlich passende (z.B. Schichtfuehrer-
+// Dienste nur an SF-Tagen) als auch solche, die an dem Tag ueber ALLE
+// Rahmenplaene hinweg noch nicht ausgeschoepft sind (Deckung schon erreicht ->
+// nicht mehr waehlbar, verhindert versehentliche Doppelbesetzung).
 const SF_EIGENE_CODES = ["LF6", "LS6", "LN6"];
 const NUR_KEIN_SF_CODES = ["LT2", "LT3", "LT4", "LF1", "LS1", "LN1"];
+const RESERVE_CAP_PRO_TAG = 4; // insgesamt 4 ARL/AL-Plaetze pro Tag, ueber alle Gruppen verteilt
 
-function codesForDayAndParity(planKey, day, parity, currentValue) {
+function usedCountAcrossPlans(grids, day, parity, code, excludePlanKey, excludeRow) {
+  let count = 0;
+  Object.keys(PLANS).forEach((pk) => {
+    const g = grids[pk];
+    for (let r = 0; r < PLANS[pk].weeks; r++) {
+      if (parityOf(r) !== parity) continue;
+      if (pk === excludePlanKey && r === excludeRow) continue;
+      if (g[r][day] === code) count++;
+    }
+  });
+  return count;
+}
+
+function requiredForCode(day, parity, code) {
+  let required = 0;
+  Object.keys(PLANS).forEach((pk) => {
+    const req = PLANS[pk].coverage(day, parity)[code];
+    if (req) required = Math.max(required, req);
+  });
+  return required;
+}
+
+function codesForDayAndParity(planKey, day, parity, currentValue, grids, rowIndex) {
   const base = codesForDay(PLANS[planKey], day);
   const sfTag = DRK_TAGE[parity].includes(day);
-  let filtered = base.filter((code) => {
-    if (SF_EIGENE_CODES.includes(code)) return sfTag;
-    if (NUR_KEIN_SF_CODES.includes(code)) return !sfTag;
+  const reserveCode = day < 5 ? "ARL" : "AL";
+  const filtered = base.filter((code) => {
+    if (code === currentValue) return true; // eigener aktueller Wert bleibt immer sichtbar/waehlbar
+    if (code === ".") return true;
+    if (SF_EIGENE_CODES.includes(code) && !sfTag) return false;
+    if (NUR_KEIN_SF_CODES.includes(code) && sfTag) return false;
+    if (code === reserveCode) {
+      return usedCountAcrossPlans(grids, day, parity, code, planKey, rowIndex) < RESERVE_CAP_PRO_TAG;
+    }
+    const required = requiredForCode(day, parity, code);
+    if (required > 0) {
+      return usedCountAcrossPlans(grids, day, parity, code, planKey, rowIndex) < required;
+    }
     return true;
   });
-  // Aktuellen Wert immer mit anzeigen, auch falls er (z.B. durch spaetere
-  // Regeln) eigentlich nicht mehr zur Auswahl stehen wuerde.
-  if (currentValue && !filtered.includes(currentValue)) filtered = [currentValue, ...filtered];
   return filtered;
 }
 
@@ -200,12 +232,6 @@ function analyzePlan(planKey, grid) {
       issues.push({ type: "Nächte", text: `Ab Woche ${r0+1} ${WEEKDAY_NAMES[d0]}: mehr als 2 Nächte in Folge` });
     }
   }
-  for (let r = 0; r < weeks; r++) {
-    if (plan.nightCodes.includes(grid[r][5]) && plan.nightCodes.includes(grid[r][6])) {
-      mark(r, 5); mark(r, 6);
-      issues.push({ type: "Wochenende", text: `Woche ${r+1}: Doppel-Nacht-Wochenende` });
-    }
-  }
   for (let i = 0; i < L; i++) {
     const j = (i + 1) % L;
     const c1 = codeAt(i), c2 = codeAt(j);
@@ -237,14 +263,12 @@ function computeCombinedCoverage(grids) {
           required[code] = Math.max(required[code] || 0, need);
         });
       });
+      // Reserve-Kapazitaet: 4 ARL/AL-Plaetze pro Tag, egal aus welcher Gruppe
+      const reserveCode = d < 5 ? "ARL" : "AL";
+      required[reserveCode] = RESERVE_CAP_PRO_TAG;
       const counts = {};
       Object.keys(required).forEach((code) => {
-        let total = 0;
-        Object.keys(PLANS).forEach((pk) => {
-          const g = grids[pk];
-          for (let r = 0; r < PLANS[pk].weeks; r++) if (parityOf(r) === parity && g[r][d] === code) total++;
-        });
-        counts[code] = total;
+        counts[code] = usedCountAcrossPlans(grids, d, parity, code, null, null);
       });
       result[parity].push({ day: d, required, counts });
     }
@@ -507,7 +531,7 @@ function RahmenplanWerkstatt() {
                   <td style={{ padding: "3px 8px", color: "#8B98AC", fontWeight: 600 }}>{r + 1}</td>
                   {row.map((cell, d) => {
                     const bad = analysis.badCells.has(`${r},${d}`);
-                    const options = codesForDayAndParity(planKey, d, parity, cell);
+                    const options = codesForDayAndParity(planKey, d, parity, cell, grids, r);
                     return (
                       <td key={d} style={{ padding: 2 }}>
                         <select value={cell} onChange={(e) => setCell(r, d, e.target.value)}

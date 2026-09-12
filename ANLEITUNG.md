@@ -1,84 +1,78 @@
-# Rahmenplan-Werkstatt mit Google Drive – Einrichtung
+# Rahmenplan-Werkstatt mit Firebase – Einrichtung
 
-Zwei Dateien liegen bei: `index.html` (die ganze App) und diese Anleitung.
-Du musst zwei Werte in `index.html` eintragen, dann alles zu GitHub hochladen.
-
----
-
-## Teil 1: Google Cloud – OAuth Client ID erstellen (ca. 10 Minuten)
-
-1. Gehe zu **https://console.cloud.google.com/**
-2. Oben ein neues Projekt anlegen (z.B. "ILS-Rahmenplan") oder ein bestehendes nutzen.
-3. Menü links → **"APIs & Dienste" → "Aktivierte APIs und Dienste"** → **"+ APIS UND DIENSTE AKTIVIEREN"**
-   → nach **"Google Drive API"** suchen → aktivieren.
-4. Menü links → **"APIs & Dienste" → "OAuth-Zustimmungsbildschirm"**
-   - Nutzertyp: **"Extern"** (falls kein Google Workspace) oder **"Intern"** (falls Workspace-Domain)
-   - App-Name: z.B. "ILS Rahmenplan-Werkstatt", eigene E-Mail als Support-Kontakt eintragen
-   - Bei "Testnutzer": **alle E-Mail-Adressen eintragen, die die App später benutzen sollen** (bis zu 100 möglich)
-   - Speichern. Die App bleibt im Status "Testing" – das reicht für internen Gebrauch,
-     Google muss die App NICHT extra prüfen. Nutzer sehen beim ersten Anmelden eine
-     Warnung "Diese App wurde nicht verifiziert" – auf "Erweitert" → "Trotzdem fortfahren" klicken, das ist normal.
-5. Menü links → **"APIs & Dienste" → "Anmeldedaten"** → **"+ ANMELDEDATEN ERSTELLEN"** → **"OAuth-Client-ID"**
-   - Anwendungstyp: **"Webanwendung"**
-   - Name: beliebig
-   - Bei **"Autorisierte JavaScript-Quellen"**: die spätere GitHub-Pages-Adresse eintragen,
-     z.B. `https://DEIN-GITHUB-NAME.github.io` (ohne Pfad dahinter, ohne Schrägstrich am Ende).
-     Falls du die Adresse noch nicht kennst: Teil 3 zuerst machen, dann hier ergänzen
-     (kann jederzeit nachträglich hinzugefügt werden).
-   - Erstellen → die **Client-ID** wird angezeigt (endet auf `.apps.googleusercontent.com`) → kopieren
+Kein Google-Login für Nutzer nötig. Jeder mit dem Link kann speichern und öffnen.
+Wichtig: das bedeutet auch, dass niemand extra freigeschaltet werden muss - aber
+auch, dass jeder mit dem Link Entwürfe ändern oder löschen könnte. Für ein internes
+Team in der Regel ein akzeptabler Kompromiss.
 
 ---
 
-## Teil 2: Ordner-ID herausfinden
+## Teil 1: Firebase-Projekt anlegen (ca. 5 Minuten, kein Kreditkarte nötig)
 
-Öffne euren gemeinsamen Google-Drive-Ordner im Browser. Die Adresse sieht so aus:
+1. Gehe zu **https://console.firebase.google.com/**
+2. **"Projekt hinzufügen"** → Namen eingeben (z.B. "ils-rahmenplan") → Google Analytics
+   kann deaktiviert werden (nicht nötig) → Projekt erstellen
+3. Im linken Menü: **"Build" → "Firestore Database"** → **"Datenbank erstellen"**
+   - Standort: eine Region in Europa wählen (z.B. `eur3` / Frankfurt)
+   - Modus: **"Testmodus"** auswählen (wir passen die Regeln gleich manuell an, s. Teil 2)
+4. Im linken Menü: **Projekteinstellungen (Zahnrad-Symbol oben) → "Allgemein"**
+   - Nach unten scrollen zu **"Ihre Apps"** → **"</>"** (Web-App) klicken
+   - Namen vergeben (z.B. "ils-rahmenplan-web") → **"App registrieren"**
+   - Es erscheint ein Codeblock mit `firebaseConfig = {...}` → diese 6 Werte
+     (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId) kopieren
+
+---
+
+## Teil 2: Zugriffsregeln setzen (wichtig!)
+
+Im linken Menü: **"Build" → "Firestore Database" → "Regeln"** (Tab oben)
+
+Den Inhalt ersetzen durch:
 
 ```
-https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz
-                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                                        das ist die Ordner-ID
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
 ```
 
-Den Teil nach `/folders/` kopieren.
+→ **"Veröffentlichen"** klicken.
+
+Das macht die Datenbank dauerhaft offen zugänglich (kein automatisches Ablaufdatum
+wie im Testmodus-Standard, der nach 30 Tagen sperrt). Ohne diesen Schritt würde die
+App nach 30 Tagen aufhören zu funktionieren.
 
 ---
 
-## Teil 3: Werte eintragen
+## Teil 3: Werte in die App eintragen
 
-In `index.html` ganz oben im Skript-Teil diese zwei Zeilen suchen und anpassen:
+In `index.html` diese Zeilen suchen und mit den Werten aus Teil 1 füllen:
 
 ```js
-const GOOGLE_CLIENT_ID = "HIER_DEINE_CLIENT_ID_EINFUEGEN.apps.googleusercontent.com";
-const DRIVE_FOLDER_ID = "HIER_DEINE_ORDNER_ID_EINFUEGEN";
+const FIREBASE_CONFIG = {
+  apiKey: "HIER_EINTRAGEN",
+  authDomain: "HIER_EINTRAGEN.firebaseapp.com",
+  projectId: "HIER_EINTRAGEN",
+  storageBucket: "HIER_EINTRAGEN.appspot.com",
+  messagingSenderId: "HIER_EINTRAGEN",
+  appId: "HIER_EINTRAGEN",
+};
 ```
 
-Ersetzen durch eure Werte aus Teil 1 und Teil 2.
+Diese Werte sind NICHT geheim (Firebase-Web-Konfiguration ist öffentlich sichtbar
+by design) - die eigentliche Absicherung passiert über die Regeln aus Teil 2.
 
 ---
-
-## Teil 4: Auf GitHub veröffentlichen
-
-1. Auf **https://github.com** ein neues Repository erstellen (z.B. `ils-rahmenplan`), öffentlich oder privat.
-2. `index.html` in das Repository hochladen (im Browser: "Add file" → "Upload files").
-3. Im Repository → **"Settings" → "Pages"**
-   - Unter "Source": **"Deploy from a branch"**, Branch **"main"**, Ordner **"/ (root)"** → Speichern
-4. Nach 1-2 Minuten ist die App erreichbar unter:
-   ```
-   https://DEIN-GITHUB-NAME.github.io/ils-rahmenplan/
-   ```
-5. Diese Adresse zurück in Google Cloud eintragen (Teil 1, Schritt 5, "Autorisierte JavaScript-Quellen"),
-   falls noch nicht geschehen.
-
----
-
-## Berechtigungen der Kollegen
-
-Jede Person, die die App nutzen soll:
-- Muss bei den Google-Testnutzern eingetragen sein (Teil 1, Schritt 4)
-- Muss Zugriff auf den Drive-Ordner haben (normal in Drive freigeben, wie gewohnt)
 
 ## Fehlerbehebung
 
-- **"Diese App wurde nicht verifiziert"** beim Anmelden: normal im Testmodus, auf "Erweitert" → "Trotzdem fortfahren"
-- **"Zugriff verweigert" / Ordner leer**: die anmeldende Person hat keinen Zugriff auf den Drive-Ordner – in Drive freigeben
-- **Anmelde-Button tut nichts**: Client-ID falsch eingetragen, oder die GitHub-Pages-Adresse fehlt bei "Autorisierte JavaScript-Quellen"
+- **"Missing or insufficient permissions"**: die Regeln aus Teil 2 wurden nicht
+  veröffentlicht, oder es ist noch der 30-Tage-Testmodus aktiv
+- **Liste bleibt leer / "Verbinde..." hängt**: FIREBASE_CONFIG-Werte falsch
+  eingetragen, oder Firestore wurde nicht in Teil 1 Schritt 3 angelegt
+- **Nach 30 Tagen funktioniert nichts mehr**: Regeln in Teil 2 nochmal prüfen -
+  der Standard-Testmodus läuft nach 30 Tagen automatisch ab

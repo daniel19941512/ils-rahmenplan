@@ -7,7 +7,8 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
   body { margin: 0; background: #101826; }
 </style>
@@ -19,13 +20,22 @@
 const { useState, useMemo, useEffect, useCallback, useRef } = React;
 
 // ============================================================
-// KONFIGURATION - hier eure eigenen Werte eintragen
+// KONFIGURATION - hier eure Firebase-Werte aus der Firebase Console
+// eintragen (Projekteinstellungen -> "Your apps" -> Web-App -> Config)
 // ============================================================
-const GOOGLE_CLIENT_ID = "HIER_DEINE_CLIENT_ID_EINFUEGEN.apps.googleusercontent.com";
-const DRIVE_FOLDER_ID = "HIER_DEINE_ORDNER_ID_EINFUEGEN";
-// Ordner-ID steht im Link: https://drive.google.com/drive/folders/DIESER_TEIL_HIER
+const FIREBASE_CONFIG = {
+  apiKey: "HIER_EINTRAGEN",
+  authDomain: "HIER_EINTRAGEN.firebaseapp.com",
+  projectId: "HIER_EINTRAGEN",
+  storageBucket: "HIER_EINTRAGEN.appspot.com",
+  messagingSenderId: "HIER_EINTRAGEN",
+  appId: "HIER_EINTRAGEN",
+};
 
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.firestore();
+const DRAFTS_COLLECTION = "rahmenplaene";
+const AUTOSAVE_DOC_ID = "autosave";
 
 // ============================================================
 // Kürzel-Legende
@@ -203,49 +213,44 @@ function computeCombinedCoverage(grids) {
 }
 
 // ============================================================
-// Google Drive Hilfsfunktionen (REST-Aufrufe direkt per fetch)
+// Firestore Hilfsfunktionen (kein Login noetig - offener Zugriff)
 // ============================================================
-async function driveListFiles(accessToken) {
-  const q = encodeURIComponent(`'${DRIVE_FOLDER_ID}' in parents and trashed = false and name contains '.json'`);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+async function fsListDrafts() {
+  const snap = await db.collection(DRAFTS_COLLECTION).orderBy("timestamp", "desc").get();
+  const out = [];
+  snap.forEach((doc) => {
+    if (doc.id === AUTOSAVE_DOC_ID) return;
+    out.push({ id: doc.id, ...doc.data() });
   });
-  if (!res.ok) throw new Error("Drive-Liste fehlgeschlagen: " + res.status);
-  const data = await res.json();
-  return data.files || [];
+  return out;
 }
-
-async function driveReadFile(accessToken, fileId) {
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error("Datei lesen fehlgeschlagen: " + res.status);
-  return res.json();
+async function fsSaveNew(ersteller, titel, grids) {
+  const ref = await db.collection(DRAFTS_COLLECTION).add({ ersteller, titel, timestamp: Date.now(), grids });
+  return ref.id;
 }
-
-async function driveCreateFile(accessToken, filename, contentObj) {
-  const metadata = { name: filename, parents: [DRIVE_FOLDER_ID], mimeType: "application/json" };
-  const boundary = "-------rahmenplan" + Date.now();
-  const body =
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(contentObj)}\r\n--${boundary}--`;
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": `multipart/related; boundary=${boundary}` },
-    body,
-  });
-  if (!res.ok) throw new Error("Speichern fehlgeschlagen: " + res.status);
-  return res.json();
+async function fsOverwrite(id, ersteller, titel, grids) {
+  await db.collection(DRAFTS_COLLECTION).doc(id).set({ ersteller, titel, timestamp: Date.now(), grids });
 }
-
-async function driveUpdateFile(accessToken, fileId, contentObj) {
-  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify(contentObj),
+async function fsLoad(id) {
+  const doc = await db.collection(DRAFTS_COLLECTION).doc(id).get();
+  if (!doc.exists) throw new Error("nicht gefunden");
+  return doc.data();
+}
+async function fsDelete(id) {
+  await db.collection(DRAFTS_COLLECTION).doc(id).delete();
+}
+async function fsAutosave(ersteller, grids) {
+  await db.collection(DRAFTS_COLLECTION).doc(AUTOSAVE_DOC_ID).set({
+    ersteller: ersteller || "(kein Name eingetragen)",
+    titel: "Autospeicherung (zuletzt bearbeitet)",
+    timestamp: Date.now(),
+    grids,
   });
-  if (!res.ok) throw new Error("Überschreiben fehlgeschlagen: " + res.status);
-  return res.json();
+}
+async function fsLoadAutosave() {
+  const doc = await db.collection(DRAFTS_COLLECTION).doc(AUTOSAVE_DOC_ID).get();
+  if (!doc.exists) throw new Error("keine Autospeicherung vorhanden");
+  return doc.data();
 }
 
 // ============================================================
@@ -255,107 +260,118 @@ function RahmenplanWerkstatt() {
   const [planKey, setPlanKey] = useState("RFP");
   const [grids, setGrids] = useState({ RFP: emptyGrid(PLANS.RFP.weeks), SF: emptyGrid(PLANS.SF.weeks), NSB: emptyGrid(PLANS.NSB.weeks) });
   const [ersteller, setErsteller] = useState("");
-  const [accessToken, setAccessToken] = useState(null);
-  const [driveFiles, setDriveFiles] = useState([]);
-  const [driveStatus, setDriveStatus] = useState("Nicht mit Google Drive verbunden.");
-  const [driveBusy, setDriveBusy] = useState(false);
-  const [currentFileId, setCurrentFileId] = useState(null);
-  const [currentFileName, setCurrentFileName] = useState(null);
-  const tokenClientRef = useRef(null);
+  const [titel, setTitel] = useState("");
+  const [draftList, setDraftList] = useState([]);
+  const [currentId, setCurrentId] = useState(null);
+  const [status, setStatus] = useState("Verbinde mit der Datenbank...");
+  const [busy, setBusy] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState("");
+  const isFirstRender = useRef(true);
 
   const plan = PLANS[planKey];
   const grid = grids[planKey];
   const analysis = useMemo(() => analyzePlan(planKey, grid), [planKey, grid]);
   const combinedCoverage = useMemo(() => computeCombinedCoverage(grids), [grids]);
 
-  useEffect(() => {
-    function initClient() {
-      if (!window.google || !window.google.accounts) { setTimeout(initClient, 200); return; }
-      tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: DRIVE_SCOPE,
-        callback: (resp) => {
-          if (resp.access_token) {
-            setAccessToken(resp.access_token);
-            setDriveStatus("Mit Google Drive verbunden.");
-          }
-        },
-      });
+  const refreshList = useCallback(async () => {
+    setBusy(true);
+    try {
+      const list = await fsListDrafts();
+      setDraftList(list);
+      setStatus(`Verbunden - ${list.length} gespeicherte(r) Entwurf/Entwürfe.`);
+    } catch (e) {
+      setStatus("Konnte Liste nicht laden: " + e.message);
     }
-    initClient();
+    setBusy(false);
   }, []);
 
-  const refreshFileList = useCallback(async (token) => {
-    setDriveBusy(true);
-    try {
-      const files = await driveListFiles(token || accessToken);
-      setDriveFiles(files);
-      setDriveStatus(`${files.length} Datei(en) im Ordner gefunden.`);
-    } catch (e) {
-      setDriveStatus("Konnte Dateiliste nicht laden: " + e.message);
-    }
-    setDriveBusy(false);
-  }, [accessToken]);
+  useEffect(() => { refreshList(); }, [refreshList]);
 
   useEffect(() => {
-    if (accessToken) refreshFileList(accessToken);
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    setAutoSaveStatus("Änderungen erkannt, speichere...");
+    const t = setTimeout(async () => {
+      try {
+        await fsAutosave(ersteller, grids);
+        setAutoSaveStatus(`Automatisch gespeichert um ${new Date().toLocaleTimeString("de-DE")}`);
+      } catch (e) {
+        setAutoSaveStatus("Autospeichern fehlgeschlagen: " + e.message);
+      }
+    }, 2000);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken]);
+  }, [grids]);
 
-  const signIn = () => {
-    if (tokenClientRef.current) tokenClientRef.current.requestAccessToken();
-    else setDriveStatus("Google-Anmeldung laedt noch, bitte kurz warten und nochmal klicken.");
+  const loadAutosave = async () => {
+    setBusy(true);
+    setStatus("Lade Autospeicherung...");
+    try {
+      const data = await fsLoadAutosave();
+      setGrids(data.grids);
+      setErsteller(data.ersteller || "");
+      setStatus(`Autospeicherung geladen (${new Date(data.timestamp).toLocaleString("de-DE")}).`);
+    } catch (e) {
+      setStatus("Keine Autospeicherung gefunden.");
+    }
+    setBusy(false);
   };
 
-  const saveAsNew = async () => {
-    if (!accessToken) { setDriveStatus("Bitte zuerst mit Google Drive verbinden."); return; }
-    const name = prompt("Dateiname (ohne .json):", `Rahmenplan_${ersteller || "unbenannt"}_${new Date().toISOString().slice(0,10)}`);
-    if (!name) return;
-    setDriveBusy(true);
-    setDriveStatus("Speichere neue Datei...");
+  const saveNew = async () => {
+    if (!ersteller.trim()) { setStatus("Bitte deinen Namen eintragen."); return; }
+    setBusy(true);
+    setStatus("Speichere...");
     try {
-      const content = { ersteller, timestamp: Date.now(), grids };
-      const file = await driveCreateFile(accessToken, name + ".json", content);
-      setCurrentFileId(file.id);
-      setCurrentFileName(name + ".json");
-      setDriveStatus(`Gespeichert als "${name}.json".`);
-      await refreshFileList(accessToken);
+      const id = await fsSaveNew(ersteller.trim(), titel.trim() || "(ohne Titel)", grids);
+      setCurrentId(id);
+      setStatus(`Gespeichert als "${titel.trim() || "(ohne Titel)"}".`);
+      setTitel("");
+      await refreshList();
     } catch (e) {
-      setDriveStatus("Fehler beim Speichern: " + e.message);
+      setStatus("Fehler beim Speichern: " + e.message);
     }
-    setDriveBusy(false);
+    setBusy(false);
   };
 
-  const saveOverwrite = async () => {
-    if (!accessToken || !currentFileId) { setDriveStatus("Keine geöffnete Datei zum Überschreiben."); return; }
-    setDriveBusy(true);
-    setDriveStatus("Überschreibe...");
+  const overwrite = async () => {
+    if (!currentId) { setStatus("Keinen geöffneten Entwurf zum Überschreiben."); return; }
+    setBusy(true);
+    setStatus("Überschreibe...");
     try {
-      const content = { ersteller, timestamp: Date.now(), grids };
-      await driveUpdateFile(accessToken, currentFileId, content);
-      setDriveStatus(`"${currentFileName}" aktualisiert.`);
-      await refreshFileList(accessToken);
+      const existing = draftList.find((d) => d.id === currentId);
+      await fsOverwrite(currentId, ersteller.trim() || "?", existing ? existing.titel : "(ohne Titel)", grids);
+      setStatus("Aktualisiert.");
+      await refreshList();
     } catch (e) {
-      setDriveStatus("Fehler beim Überschreiben: " + e.message);
+      setStatus("Fehler: " + e.message);
     }
-    setDriveBusy(false);
+    setBusy(false);
   };
 
-  const openFile = async (file) => {
-    if (!accessToken) return;
-    setDriveBusy(true);
-    setDriveStatus(`Öffne "${file.name}"...`);
+  const openDraft = async (d) => {
+    setBusy(true);
+    setStatus(`Öffne "${d.titel}"...`);
     try {
-      const content = await driveReadFile(accessToken, file.id);
-      setGrids(content.grids);
-      setErsteller(content.ersteller || "");
-      setCurrentFileId(file.id);
-      setCurrentFileName(file.name);
-      setDriveStatus(`"${file.name}" geöffnet.`);
+      const data = await fsLoad(d.id);
+      setGrids(data.grids);
+      setErsteller(data.ersteller || "");
+      setCurrentId(d.id);
+      setStatus(`"${d.titel}" geöffnet.`);
     } catch (e) {
-      setDriveStatus("Fehler beim Öffnen: " + e.message);
+      setStatus("Fehler beim Öffnen: " + e.message);
     }
-    setDriveBusy(false);
+    setBusy(false);
+  };
+
+  const removeDraft = async (id) => {
+    setBusy(true);
+    try {
+      await fsDelete(id);
+      await refreshList();
+      setStatus("Entwurf gelöscht.");
+    } catch (e) {
+      setStatus("Löschen fehlgeschlagen: " + e.message);
+    }
+    setBusy(false);
   };
 
   const setCell = (r, d, value) => {
@@ -379,49 +395,39 @@ function RahmenplanWerkstatt() {
     <div style={styles.page}>
       <div style={styles.box}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 4px 0" }}>Rahmenplan-Werkstatt · ILS Freiburg</h1>
-        <p style={{ color: "#8B98AC", fontSize: 13, margin: "0 0 16px 0" }}>Gespeichert wird als Datei in eurem gemeinsamen Google-Drive-Ordner.</p>
+        <p style={{ color: "#8B98AC", fontSize: 13, margin: "0 0 4px 0" }}>Kein Login nötig - jeder mit diesem Link kann speichern und öffnen.</p>
+        <p style={{ color: "#4C5A70", fontSize: 12, margin: "0 0 16px 0" }}>{autoSaveStatus || "Noch keine Änderungen in dieser Sitzung."}</p>
 
-        {/* Google Drive Leiste */}
         <div style={styles.panel}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
             <input placeholder="Dein Name" value={ersteller} onChange={(e) => setErsteller(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #2A3446", background: "#0D1420", color: "#E7ECF3", fontSize: 12, width: 160 }} />
-            {!accessToken ? (
-              <button onClick={signIn} style={styles.btnPrimary}>Mit Google Drive verbinden</button>
-            ) : (
-              <>
-                <button onClick={saveAsNew} disabled={driveBusy} style={styles.btnPrimary}>Als neue Datei speichern</button>
-                <button onClick={saveOverwrite} disabled={driveBusy || !currentFileId} style={styles.btn}>
-                  Aktuelle Datei überschreiben {currentFileName ? `(${currentFileName})` : ""}
-                </button>
-                <button onClick={() => refreshFileList()} disabled={driveBusy} style={styles.btn}>Liste aktualisieren</button>
-              </>
-            )}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #2A3446", background: "#0D1420", color: "#E7ECF3", fontSize: 12, width: 140 }} />
+            <input placeholder="Titel/Kommentar" value={titel} onChange={(e) => setTitel(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #2A3446", background: "#0D1420", color: "#E7ECF3", fontSize: 12, flex: "1 1 200px" }} />
+            <button onClick={saveNew} disabled={busy} style={styles.btnPrimary}>Als neuen Entwurf speichern</button>
+            <button onClick={overwrite} disabled={busy || !currentId} style={styles.btn}>Geöffneten Entwurf überschreiben</button>
+            <button onClick={loadAutosave} disabled={busy} style={styles.btn}>Letzte Autospeicherung laden</button>
           </div>
-          <p style={{ fontSize: 12, color: "#8FE3A6", margin: "0 0 8px 0" }}>{driveStatus}</p>
-          {accessToken && (
-            <div>
-              <h4 style={{ fontSize: 12, margin: "8px 0 6px 0", color: "#8B98AC" }}>Dateien im Ordner</h4>
-              {driveFiles.length === 0 ? (
-                <p style={{ fontSize: 12, color: "#4C5A70" }}>Keine Dateien gefunden.</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {driveFiles.map((f) => (
-                    <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0D1420", border: "1px solid #2A3446", borderRadius: 6, padding: "6px 10px" }}>
-                      <div style={{ flex: 1, fontSize: 12 }}>
-                        <span style={{ color: "#DCE7FF" }}>{f.name}</span>{" "}
-                        <span style={{ color: "#4C5A70" }}>· {new Date(f.modifiedTime).toLocaleString("de-DE")}</span>
-                      </div>
-                      <button onClick={() => openFile(f)} disabled={driveBusy} style={{ ...styles.btnPrimary, padding: "4px 10px", fontSize: 11 }}>Öffnen</button>
-                    </div>
-                  ))}
+          <p style={{ fontSize: 12, color: "#8FE3A6", margin: "0 0 8px 0" }}>{status}</p>
+          <h4 style={{ fontSize: 12, margin: "8px 0 6px 0", color: "#8B98AC" }}>Gespeicherte Entwürfe</h4>
+          {draftList.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#4C5A70" }}>Noch keine Entwürfe gespeichert.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {draftList.map((d) => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#0D1420", border: "1px solid #2A3446", borderRadius: 6, padding: "6px 10px" }}>
+                  <div style={{ flex: 1, fontSize: 12 }}>
+                    <span style={{ color: "#DCE7FF", fontWeight: 600 }}>{d.titel}</span>{" "}
+                    <span style={{ color: "#4C5A70" }}>· {d.ersteller} · {new Date(d.timestamp).toLocaleString("de-DE")}</span>
+                  </div>
+                  <button onClick={() => openDraft(d)} disabled={busy} style={{ ...styles.btnPrimary, padding: "4px 10px", fontSize: 11 }}>Öffnen</button>
+                  <button onClick={() => removeDraft(d.id)} disabled={busy} style={{ padding: "4px 10px", borderRadius: 5, border: "1px solid #3A2A2A", background: "#241717", color: "#E39C9C", fontSize: 11, cursor: "pointer" }}>Löschen</button>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
 
-        {/* Plan-Tabs */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
           {Object.keys(PLANS).map((key) => (
             <button key={key} onClick={() => setPlanKey(key)}
@@ -435,7 +441,6 @@ function RahmenplanWerkstatt() {
           <button onClick={clearPlan} style={{ ...styles.btn, borderColor: "#3A2A2A", background: "#241717", color: "#E39C9C" }}>Diesen Plan leeren</button>
         </div>
 
-        {/* Raster */}
         <div style={{ overflowX: "auto", ...styles.panel }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
             <thead>
@@ -469,7 +474,6 @@ function RahmenplanWerkstatt() {
           </table>
         </div>
 
-        {/* Kombinierte Deckung */}
         <div style={styles.panel}>
           <h3 style={{ fontSize: 13, margin: "0 0 4px 0", color: "#8B98AC" }}>Offene Dienste - über alle Rahmenpläne kombiniert</h3>
           <p style={{ fontSize: 11, color: "#4C5A70", margin: "0 0 10px 0" }}>
@@ -496,7 +500,6 @@ function RahmenplanWerkstatt() {
           </div>
         </div>
 
-        {/* Regelverstöße */}
         <div style={styles.panel}>
           <h3 style={{ fontSize: 13, margin: "0 0 8px 0", color: "#8B98AC" }}>
             Regelprüfung {plan.label} {analysis.issues.length === 0 ? "- alles in Ordnung" : `- ${analysis.issues.length} Punkt(e)`}
@@ -512,7 +515,6 @@ function RahmenplanWerkstatt() {
           )}
         </div>
 
-        {/* Legende */}
         <div style={styles.panel}>
           <h3 style={{ fontSize: 13, margin: "0 0 8px 0", color: "#8B98AC" }}>Kürzel-Legende</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6, fontSize: 11 }}>

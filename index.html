@@ -251,10 +251,13 @@ function analyzePlan(planKey, grid) {
   for (let i = 0; i < L; i++) {
     const j = (i + 1) % L;
     const c1 = codeAt(i), c2 = codeAt(j);
-    if (plan.nightCodes.includes(c1) && (c2 === "ARL" || c2 === "AL")) {
+    // RFP zaehlt hier wie eine Nacht: im schlimmsten Fall wird sie als
+    // Nachteinsatz bis 06:00 aktiviert - direkt danach ARL/AL waere dann
+    // genau dasselbe Ruhezeitproblem wie nach einer echten Nachtschicht.
+    if ((plan.nightCodes.includes(c1) || c1 === "RFP") && (c2 === "ARL" || c2 === "AL")) {
       const [r1, d1] = chain[i], [r2, d2] = chain[j];
       mark(r1, d1); mark(r2, d2);
-      issues.push({ type: "Nacht→ARL", text: `Woche ${r1+1} ${WEEKDAY_NAMES[d1]} → Woche ${r2+1} ${WEEKDAY_NAMES[d2]}: ARL/AL direkt nach Nacht` });
+      issues.push({ type: "Nacht→ARL", text: `Woche ${r1+1} ${WEEKDAY_NAMES[d1]} (${c1}) → Woche ${r2+1} ${WEEKDAY_NAMES[d2]}: ARL/AL direkt nach Nacht/RFP (falls RFP nachts aktiviert wird)` });
     }
   }
   for (let i = 0; i < L; i++) {

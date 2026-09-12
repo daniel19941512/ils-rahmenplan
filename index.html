@@ -67,6 +67,26 @@ const CODES = {
 const WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const DRK_TAGE = { gerade: [1, 3, 5], ungerade: [0, 2, 4, 6] };
 
+// Tatsaechliche Arbeitszeit je Kuerzel (Stunden) - RFP zaehlt mit 3h Grundbewertung,
+// nicht mit der vollen Rufbereitschaftsspanne.
+const DURATION = {
+  ".": 0, "ARL": 8, "AL": 0, "RFP": 3,
+  "LF5": 8, "LF6": 7.5, "LF1": 8, "LF2": 7,
+  "LS5": 8, "LS6": 8, "LS1": 8, "LS2": 8,
+  "LN5": 8, "LN6": 8.5, "LN1": 8,
+  "LT1": 8, "LT2": 8, "LT3": 8, "LT5": 8, "LT4": 8, "LT6": 8,
+};
+const SOLL_WOCHENARBEITSZEIT = 38.5; // BV Arbeitszeit ILS, Paragraph 2 Abs. 1
+const SOLL_TOLERANZ = 0.5; // +/- Stunden, innerhalb dessen "im Soll" gilt
+
+function weekHours(row) {
+  return row.reduce((sum, code) => sum + (DURATION[code] ?? 0), 0);
+}
+function avgWeeklyHours(grid) {
+  const total = grid.reduce((sum, row) => sum + weekHours(row), 0);
+  return total / grid.length;
+}
+
 const OWN_CODES = {
   RFP: { wd: ["LF5", "LS5", "LF2", "LS2", "LN5", "RFP"], sat: ["LF5", "LS5", "LN5", "RFP"], sun: ["LF5", "LS5", "LN5", "RFP"] },
   SF: { wd: ["LF6", "LS6", "LN6"], sat: ["LF6", "LS6", "LN6"], sun: ["LF6", "LS6", "LN6"] },
@@ -115,6 +135,26 @@ const PLANS = {
 function emptyGrid(weeks) { return Array.from({ length: weeks }, () => Array(7).fill(".")); }
 function codesForDay(plan, day) { return day < 5 ? plan.weekdayCodes : day === 5 ? plan.satCodes : plan.sunCodes; }
 function parityOf(r) { return r % 2 === 0 ? "ungerade" : "gerade"; }
+
+// Nur die an diesem Tag/dieser Paritaet tatsaechlich verfuegbaren/benoetigten
+// Kuerzel zur Auswahl anbieten - macht sofort sichtbar, welche Dienste an dem
+// Tag ueberhaupt sinnvoll sind (z.B. Schichtfuehrer-Dienste nur an SF-Tagen).
+const SF_EIGENE_CODES = ["LF6", "LS6", "LN6"];
+const NUR_KEIN_SF_CODES = ["LT2", "LT3", "LT4", "LF1", "LS1", "LN1"];
+
+function codesForDayAndParity(planKey, day, parity, currentValue) {
+  const base = codesForDay(PLANS[planKey], day);
+  const sfTag = DRK_TAGE[parity].includes(day);
+  let filtered = base.filter((code) => {
+    if (SF_EIGENE_CODES.includes(code)) return sfTag;
+    if (NUR_KEIN_SF_CODES.includes(code)) return !sfTag;
+    return true;
+  });
+  // Aktuellen Wert immer mit anzeigen, auch falls er (z.B. durch spaetere
+  // Regeln) eigentlich nicht mehr zur Auswahl stehen wuerde.
+  if (currentValue && !filtered.includes(currentValue)) filtered = [currentValue, ...filtered];
+  return filtered;
+}
 
 function analyzePlan(planKey, grid) {
   const plan = PLANS[planKey];
@@ -455,30 +495,49 @@ function RahmenplanWerkstatt() {
                 <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC" }}>Woche</th>
                 {WEEKDAY_NAMES.map((n) => <th key={n} style={{ padding: "4px 8px", color: "#8B98AC", minWidth: 64 }}>{n}</th>)}
                 <th style={{ padding: "4px 8px", color: "#8B98AC" }}>Parität</th>
+                <th style={{ padding: "4px 8px", color: "#8B98AC" }}>AZ</th>
               </tr>
             </thead>
             <tbody>
-              {grid.map((row, r) => (
+              {grid.map((row, r) => {
+                const parity = parityOf(r);
+                const hours = weekHours(row);
+                return (
                 <tr key={r}>
                   <td style={{ padding: "3px 8px", color: "#8B98AC", fontWeight: 600 }}>{r + 1}</td>
                   {row.map((cell, d) => {
                     const bad = analysis.badCells.has(`${r},${d}`);
+                    const options = codesForDayAndParity(planKey, d, parity, cell);
                     return (
                       <td key={d} style={{ padding: 2 }}>
                         <select value={cell} onChange={(e) => setCell(r, d, e.target.value)}
                           style={{ width: "100%", padding: "4px 2px", borderRadius: 5, border: "1px solid " + (bad ? "#C24949" : "#2A3446"),
                             background: bad ? "#2A1616" : cell === "." ? "#0D1420" : "#1C2B47", color: bad ? "#F0A8A8" : cell === "." ? "#4C5A70" : "#DCE7FF",
                             fontSize: 11, fontFamily: "monospace", textAlign: "center" }}>
-                          {codesForDay(plan, d).map((c) => <option key={c} value={c}>{c}</option>)}
+                          {options.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </td>
                     );
                   })}
-                  <td style={{ padding: "3px 8px", color: "#4C5A70", fontSize: 11 }}>{parityOf(r)}</td>
+                  <td style={{ padding: "3px 8px", color: "#4C5A70", fontSize: 11 }}>{parity}</td>
+                  <td style={{ padding: "3px 8px", color: "#8B98AC", fontSize: 11, textAlign: "right" }}>{hours}h</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
+          {(() => {
+            const avg = avgWeeklyHours(grid);
+            const imSoll = Math.abs(avg - SOLL_WOCHENARBEITSZEIT) <= SOLL_TOLERANZ;
+            return (
+              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 12,
+                background: imSoll ? "#16321F" : "#2A1F16", border: "1px solid " + (imSoll ? "#3E7A4F" : "#7A5A3E"),
+                color: imSoll ? "#8FE3A6" : "#E3C08F" }}>
+                Ø Wochenarbeitszeit {plan.label}: <strong>{avg.toFixed(1)}h</strong> (Soll: {SOLL_WOCHENARBEITSZEIT}h laut Betriebsvereinbarung)
+                {imSoll ? " – im Soll" : ` – Abweichung ${(avg - SOLL_WOCHENARBEITSZEIT).toFixed(1)}h`}
+              </div>
+            );
+          })()}
         </div>
 
         <div style={styles.panel}>

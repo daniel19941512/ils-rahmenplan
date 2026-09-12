@@ -580,7 +580,10 @@ function RahmenplanWerkstatt() {
             <thead>
               <tr>
                 <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC" }}>Woche</th>
-                {WEEKDAY_NAMES.map((n) => <th key={n} style={{ padding: "6px 8px", color: "#8B98AC", minWidth: 78 }}>{n}</th>)}
+                {WEEKDAY_NAMES.map((n, d) => (
+                  <th key={n} style={{ padding: "6px 8px", color: d >= 5 ? "#3A3418" : "#8B98AC",
+                    background: d >= 5 ? "#3A3418" : "transparent", minWidth: 78 }}>{n}</th>
+                ))}
                 <th style={{ padding: "4px 8px", color: "#8B98AC" }}>Parität</th>
                 <th style={{ padding: "4px 8px", color: "#8B98AC" }}>AZ</th>
               </tr>
@@ -595,11 +598,13 @@ function RahmenplanWerkstatt() {
                   {row.map((cell, d) => {
                     const bad = analysis.badCells.has(`${r},${d}`);
                     const options = codesForDayAndParity(planKey, d, parity, cell, grids, r);
+                    const weekend = d >= 5;
                     return (
-                      <td key={d} style={{ padding: 2 }}>
+                      <td key={d} style={{ padding: 2, background: weekend ? "#211E10" : "transparent" }}>
                         <select value={cell} onChange={(e) => setCell(r, d, e.target.value)}
-                          style={{ width: "100%", padding: "8px 4px", borderRadius: 5, border: "1px solid " + (bad ? "#C24949" : "#2A3446"),
-                            background: bad ? "#2A1616" : cell === "." ? "#0D1420" : "#1C2B47", color: bad ? "#F0A8A8" : cell === "." ? "#4C5A70" : "#DCE7FF",
+                          style={{ width: "100%", padding: "8px 4px", borderRadius: 5, border: "1px solid " + (bad ? "#C24949" : weekend ? "#5A5228" : "#2A3446"),
+                            background: bad ? "#2A1616" : cell === "." ? (weekend ? "#181509" : "#0D1420") : "#1C2B47",
+                            color: bad ? "#F0A8A8" : cell === "." ? "#4C5A70" : "#DCE7FF",
                             fontSize: 13, fontFamily: "monospace", textAlign: "center" }}>
                           {options.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
@@ -611,6 +616,21 @@ function RahmenplanWerkstatt() {
                 </tr>
                 );
               })}
+              <tr style={{ borderTop: "2px solid #3A4560" }}>
+                <td style={{ padding: "6px 8px", fontWeight: 700, color: "#DCE7FF" }}>Dienste</td>
+                {WEEKDAY_NAMES.map((n, d) => {
+                  const count = grid.filter((row) => row[d] !== ".").length;
+                  const weekend = d >= 5;
+                  return (
+                    <td key={d} style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#DCE7FF",
+                      background: weekend ? "#3A3418" : "transparent" }}>
+                      {count}
+                    </td>
+                  );
+                })}
+                <td></td>
+                <td></td>
+              </tr>
             </tbody>
           </table>
           {(() => {

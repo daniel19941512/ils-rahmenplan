@@ -306,21 +306,36 @@ function computeCombinedCoverage(grids) {
 
       // Springer-Ausgleich: wie viele Fruehdienst-/Spaetdienst-Luecken bleiben
       // uebrig, NACHDEM Springer-Platzhalter (SPR-F/SPR-S) sie aufgefuellt haben.
+      // Zusaetzlich: Springer werden in fester Reihenfolge auf die offenen
+      // Kuerzel verteilt, damit einzelne Kuerzel als "gedeckt" (gruen, mit
+      // Blitz-Symbol) angezeigt werden koennen, wenn genug Springer da sind.
       const springer = {};
+      const effectiveCounts = { ...counts };
+      const springerGedeckt = new Set();
       Object.entries(SPRINGER_GRUPPEN).forEach(([springerCode, gruppe]) => {
         let deficitVorher = 0;
         gruppe.forEach((code) => {
           if (code in required) deficitVorher += Math.max(0, required[code] - (counts[code] || 0));
         });
-        const anzahlSpringer = usedCountAcrossPlans(grids, d, parity, springerCode, null, null);
+        let verfuegbar = usedCountAcrossPlans(grids, d, parity, springerCode, null, null);
+        gruppe.forEach((code) => {
+          if (!(code in required) || verfuegbar <= 0) return;
+          const luecke = required[code] - (effectiveCounts[code] || 0);
+          if (luecke > 0) {
+            const zuweisung = Math.min(luecke, verfuegbar);
+            effectiveCounts[code] = (effectiveCounts[code] || 0) + zuweisung;
+            verfuegbar -= zuweisung;
+            if (effectiveCounts[code] >= required[code]) springerGedeckt.add(code);
+          }
+        });
         springer[springerCode] = {
           deficitVorher,
-          anzahlSpringer,
-          deficitNachher: Math.max(0, deficitVorher - anzahlSpringer),
+          anzahlSpringer: usedCountAcrossPlans(grids, d, parity, springerCode, null, null),
+          deficitNachher: Math.max(0, deficitVorher - usedCountAcrossPlans(grids, d, parity, springerCode, null, null)),
         };
       });
 
-      result[parity].push({ day: d, required, counts, springer });
+      result[parity].push({ day: d, required, counts, effectiveCounts, springerGedeckt, springer });
     }
   });
   return result;
@@ -728,6 +743,9 @@ function RahmenplanWerkstatt() {
                 ALLE_KUERZEL_REIHENFOLGE.forEach((code) => { if (code in counts) sum += counts[code]; });
                 const reserveCode = day < 5 ? "ARL" : "AL";
                 if (reserveCode in counts) sum += counts[reserveCode];
+                // Springer sind auch echte Arbeitstage - mitzaehlen
+                sum += usedCountAcrossPlans(grids, day, parity, "SPR-F", null, null);
+                sum += usedCountAcrossPlans(grids, day, parity, "SPR-S", null, null);
                 return sum;
               });
               return (
@@ -751,16 +769,18 @@ function RahmenplanWerkstatt() {
                           return (
                             <tr key={code} style={{ borderTop: "1px solid #1A2333" }}>
                               <td style={{ padding: "5px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>{code}</td>
-                              {dayEntries.map(({ day, required, counts }) => {
+                              {dayEntries.map(({ day, required, counts, springerGedeckt }) => {
                                 const weekend = day >= 5;
                                 if (!(code in required)) {
                                   return <td key={day} style={{ padding: "5px 6px", textAlign: "center", color: weekend ? "#5A5228" : "#3A4560", background: weekend ? "#211E10" : "transparent" }}>–</td>;
                                 }
-                                const have = counts[code], need = required[code], ok = have === need;
+                                const have = counts[code], need = required[code];
+                                const gedecktPerSpringer = springerGedeckt && springerGedeckt.has(code);
+                                const ok = have === need || gedecktPerSpringer;
                                 return (
                                   <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
                                     color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
-                                    {have}/{need}
+                                    {have}/{need}{gedecktPerSpringer && have < need ? " ⚡" : ""}
                                   </td>
                                 );
                               })}

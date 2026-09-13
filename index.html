@@ -95,6 +95,61 @@ const SPRINGER_GRUPPEN = {
 const SOLL_WOCHENARBEITSZEIT = 38.5; // BV Arbeitszeit ILS, Paragraph 2 Abs. 1
 const SOLL_TOLERANZ = 0.5; // +/- Stunden, innerhalb dessen "im Soll" gilt
 
+// Vollstaendige Referenztabelle aus Anlage 2 "Schichten ILS" - getrennt nach
+// Werktag/Samstag/Sonntag, da sich Zeiten/Bemerkungen je Tagtyp unterscheiden.
+// Nur zur Anzeige/Nachschlagen, wird NICHT fuer die Berechnungen oben verwendet
+// (dafuer bleibt die vereinfachte CODES/DURATION-Tabelle wie bisher).
+const SCHICHTEN_REFERENZ = {
+  "Werktag": [
+    ["LF5", "Früh", "06:00", "14:00", "8", "24/7"],
+    ["LF6", "Früh", "06:30", "14:00", "8", "jeden 2.Tag, SF"],
+    ["LF1", "Früh", "06:00", "14:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LF2", "Früh", "06:00", "13:00", "7", "KTW, WT"],
+    ["LS5", "Spät", "14:00", "22:00", "8", "24/7"],
+    ["LS6", "Spät", "14:00", "22:00", "8", "jeden 2.Tag, SF"],
+    ["LS1", "Spät", "14:00", "22:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LS2", "Spät", "13:00", "21:00", "8", "KTW, WT"],
+    ["LN5", "Nacht", "22:00", "06:00", "8", "24/7"],
+    ["LN6", "Nacht", "22:00", "06:30", "8", "jeden 2.Tag, SF"],
+    ["LN1", "Nacht", "22:00", "06:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LT1", "Tag", "09:00", "17:00", "8", "WT"],
+    ["LT2", "Tag", "10:00", "18:00", "8", "WT, wenn kein SF"],
+  ],
+  "Samstag": [
+    ["LF5", "Früh", "06:00", "14:00", "8", "24/7"],
+    ["LF6", "Früh", "06:30", "14:00", "8", "SF jeden 2.Tag"],
+    ["LF1", "Früh", "06:00", "14:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LS5", "Spät", "14:00", "22:00", "8", "24/7"],
+    ["LS6", "Spät", "14:00", "22:00", "8", "SF jeden 2.Tag"],
+    ["LS1", "Spät", "14:00", "22:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LN5", "Nacht", "22:00", "06:00", "8", "24/7"],
+    ["LN6", "Nacht", "22:00", "06:30", "8", "SF jeden 2.Tag"],
+    ["LN1", "Nacht", "22:00", "06:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LT3", "Tag", "08:00", "16:00", "8", "SA, wenn kein SF"],
+    ["LT5", "Tag", "12:00", "20:00", "8", "SA"],
+  ],
+  "Sonntag/Feiertag": [
+    ["LF5", "Früh", "06:00", "14:00", "8", "24/7"],
+    ["LF6", "Früh", "06:30", "14:30", "8", "SF jeden 2.Tag"],
+    ["LF1", "Früh", "06:00", "14:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LS5", "Spät", "14:00", "22:00", "8", "24/7"],
+    ["LS6", "Spät", "14:00", "22:00", "8", "SF jeden 2.Tag"],
+    ["LS1", "Spät", "14:00", "22:00", "8", "Jeden 2.Tag, gegen SF"],
+    ["LN5", "Nacht", "22:00", "06:00", "8", "24/7"],
+    ["LN6", "Nacht", "22:00", "06:30", "8,5", "SF jeden 2.Tag"],
+    ["LN1", "Nacht", "22:00", "06:00", "8", "Jeden 2. Tag, gegen SF"],
+    ["LT4", "Tag", "09:00", "17:00", "8", "So, wenn kein SF"],
+    ["LT6", "Tag", "10:00", "18:00", "8", "So"],
+  ],
+  "Ergänzend (alle Tage)": [
+    ["RFP", "Rufbereitschaft", "05:30", "22:30", "3 (Grund)", "Bei Aktivierung zusätzlich volle Dienstzeit des gezogenen Dienstes"],
+    ["ARL", "Ausfallreserve", "08:00", "16:00", "8", "Werktags, Platzhalter für Urlaub/Krankheit/Personalausgleich"],
+    ["AL", "Ausfallreserve", "08:00", "08:00", "0", "Wochenende, Platzhalter, 0h bis Aktivierung"],
+    ["SPR-F", "Springer Früh", "06:00", "14:00", "8 (i.d.R.)", "Platzhalter - deckt flexibel LF5/LF2/LF1/LF6 ab, kein fester Dienst"],
+    ["SPR-S", "Springer Spät", "13:00", "22:00", "8 (i.d.R.)", "Platzhalter - deckt flexibel LS5/LS2/LS1/LS6 ab, kein fester Dienst"],
+  ],
+};
+
 // Feste Reihenfolge fuer die "Offene Dienste"-Tabelle, damit alle Tage
 // spaltengenau untereinander stehen (ARL/AL wird separat als eigene Zeile behandelt).
 const ALLE_KUERZEL_REIHENFOLGE = [
@@ -878,6 +933,45 @@ function RahmenplanWerkstatt() {
               </div>
             ))}
           </div>
+        </div>
+
+        <div style={styles.panel}>
+          <h3 style={{ fontSize: 15, margin: "0 0 8px 0", color: "#8B98AC" }}>Alle Dienste im Detail (Anlage 2, Schichten ILS)</h3>
+          <p style={{ fontSize: 13, color: "#4C5A70", margin: "0 0 12px 0" }}>
+            Vollständige Referenz mit Zeiten und Bemerkungen, getrennt nach Werktag/Samstag/Sonntag – dient nur
+            zum Nachschlagen, wird für die Berechnungen oben nicht verwendet.
+          </p>
+          {Object.entries(SCHICHTEN_REFERENZ).map(([abschnitt, zeilen]) => (
+            <div key={abschnitt} style={{ marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, margin: "0 0 6px 0", color: "#DCE7FF" }}>{abschnitt}</h4>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "5px 8px", color: "#8B98AC" }}>Kürzel</th>
+                      <th style={{ textAlign: "left", padding: "5px 8px", color: "#8B98AC" }}>Diensttyp</th>
+                      <th style={{ padding: "5px 8px", color: "#8B98AC" }}>Beginn</th>
+                      <th style={{ padding: "5px 8px", color: "#8B98AC" }}>Ende</th>
+                      <th style={{ padding: "5px 8px", color: "#8B98AC" }}>Dauer</th>
+                      <th style={{ textAlign: "left", padding: "5px 8px", color: "#8B98AC" }}>Bemerkung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zeilen.map(([code, typ, beginn, ende, dauer, bemerkung], i) => (
+                      <tr key={code + i} style={{ borderTop: "1px solid #1A2333" }}>
+                        <td style={{ padding: "4px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>{code}</td>
+                        <td style={{ padding: "4px 8px", color: "#8B98AC" }}>{typ}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "center", fontFamily: "monospace", color: "#8B98AC" }}>{beginn}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "center", fontFamily: "monospace", color: "#8B98AC" }}>{ende}</td>
+                        <td style={{ padding: "4px 8px", textAlign: "center", color: "#8B98AC" }}>{dauer}</td>
+                        <td style={{ padding: "4px 8px", color: "#8FE3A6" }}>{bemerkung}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

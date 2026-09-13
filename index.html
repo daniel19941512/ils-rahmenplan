@@ -469,6 +469,35 @@ function RahmenplanWerkstatt() {
   const grid = grids[planKey];
   const analysis = useMemo(() => analyzePlan(planKey, grid), [planKey, grid]);
   const combinedCoverage = useMemo(() => computeCombinedCoverage(grids), [grids]);
+  const allAnalysis = useMemo(() => {
+    const out = {};
+    Object.keys(PLANS).forEach((pk) => { out[pk] = analyzePlan(pk, grids[pk]); });
+    return out;
+  }, [grids]);
+  const fortschritt = useMemo(() => {
+    const out = {};
+    Object.keys(PLANS).forEach((pk) => {
+      const g = grids[pk];
+      const total = PLANS[pk].weeks * 7;
+      let gefuellt = 0;
+      g.forEach((row) => row.forEach((c) => { if (c !== ".") gefuellt++; }));
+      out[pk] = Math.round((gefuellt / total) * 100);
+    });
+    return out;
+  }, [grids]);
+  const gesamtStatus = useMemo(() => {
+    let offeneRegeln = 0;
+    Object.values(allAnalysis).forEach((a) => { offeneRegeln += a.issues.length; });
+    let offeneDeckung = 0;
+    ["ungerade", "gerade"].forEach((parity) => {
+      combinedCoverage[parity].forEach(({ required, effectiveCounts }) => {
+        Object.entries(required).forEach(([code, need]) => {
+          if ((effectiveCounts[code] || 0) !== need) offeneDeckung++;
+        });
+      });
+    });
+    return { offeneRegeln, offeneDeckung, ok: offeneRegeln === 0 && offeneDeckung === 0 };
+  }, [allAnalysis, combinedCoverage]);
 
   const refreshList = useCallback(async () => {
     setBusy(true);
@@ -616,7 +645,16 @@ function RahmenplanWerkstatt() {
       <div style={styles.box}>
         <h1 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 4px 0" }}>Rahmenplan-Werkstatt · ILS Freiburg</h1>
         <p style={{ color: "#8B98AC", fontSize: 15, margin: "0 0 4px 0" }}>Kein Login nötig - jeder mit diesem Link kann speichern und öffnen.</p>
-        <p style={{ color: "#4C5A70", fontSize: 14, margin: "0 0 16px 0" }}>{autoSaveStatus || "Noch keine Änderungen in dieser Sitzung."}</p>
+        <p style={{ color: "#4C5A70", fontSize: 14, margin: "0 0 12px 0" }}>{autoSaveStatus || "Noch keine Änderungen in dieser Sitzung."}</p>
+
+        <div style={{ padding: "10px 14px", borderRadius: 8, marginBottom: 16, fontSize: 14, fontWeight: 600,
+          background: gesamtStatus.ok ? "#16321F" : "#2A1F16",
+          border: "1px solid " + (gesamtStatus.ok ? "#3E7A4F" : "#7A5A3E"),
+          color: gesamtStatus.ok ? "#8FE3A6" : "#E3C08F" }}>
+          {gesamtStatus.ok
+            ? "✓ Alles passt – keine offenen Regelverstöße oder Deckungslücken über alle drei Rahmenpläne."
+            : `⚠ ${gesamtStatus.offeneRegeln} Regelpunkt(e) und ${gesamtStatus.offeneDeckung} offene Deckungsstelle(n) über alle drei Rahmenpläne zusammen.`}
+        </div>
 
         <div style={styles.panel}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
@@ -687,15 +725,29 @@ function RahmenplanWerkstatt() {
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-          {Object.keys(PLANS).map((key) => (
-            <button key={key} onClick={() => setPlanKey(key)}
-              style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid " + (planKey === key ? "#5B8DEF" : "#2A3446"),
-                background: planKey === key ? "#1C2B47" : "#161F2E", color: planKey === key ? "#DCE7FF" : "#8B98AC", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
-              {PLANS[key].label}
-              <span style={{ display: "block", fontWeight: 400, fontSize: 13, opacity: 0.75 }}>{PLANS[key].people} Pers. · {PLANS[key].weeks} Wochen</span>
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+          {Object.keys(PLANS).map((key) => {
+            const issueCount = allAnalysis[key].issues.length;
+            const pct = fortschritt[key];
+            return (
+              <button key={key} onClick={() => setPlanKey(key)}
+                style={{ position: "relative", padding: "8px 16px", borderRadius: 8, border: "1px solid " + (planKey === key ? "#5B8DEF" : "#2A3446"),
+                  background: planKey === key ? "#1C2B47" : "#161F2E", color: planKey === key ? "#DCE7FF" : "#8B98AC", fontSize: 15, fontWeight: 600, cursor: "pointer" }}>
+                {issueCount > 0 && (
+                  <span style={{ position: "absolute", top: -8, right: -8, background: "#C24949", color: "#fff", fontSize: 11, fontWeight: 700,
+                    borderRadius: 10, padding: "2px 7px", border: "2px solid #101826" }}>
+                    {issueCount}
+                  </span>
+                )}
+                {PLANS[key].label}
+                <span style={{ display: "block", fontWeight: 400, fontSize: 13, opacity: 0.75 }}>{PLANS[key].people} Pers. · {PLANS[key].weeks} Wochen</span>
+                <div style={{ marginTop: 5, height: 4, width: "100%", background: "#0D1420", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: pct === 100 ? "#8FE3A6" : "#5B8DEF", transition: "width 0.3s" }} />
+                </div>
+                <span style={{ fontSize: 10, color: "#4C5A70", fontWeight: 400 }}>{pct}% ausgefüllt</span>
+              </button>
+            );
+          })}
           <div style={{ flex: 1 }} />
           {clearConfirm ? (
             <>
@@ -712,17 +764,17 @@ function RahmenplanWerkstatt() {
           <button onClick={exportAsPdf} style={styles.btn}>Als PDF exportieren (Querformat)</button>
         </div>
 
-        <div style={{ overflowX: "auto", ...styles.panel }}>
+        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "60vh", ...styles.panel }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
             <thead>
               <tr>
-                <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC" }}>Woche</th>
+                <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>Woche</th>
                 {WEEKDAY_NAMES.map((n, d) => (
                   <th key={n} style={{ padding: "6px 8px", color: d >= 5 ? "#3A3418" : "#8B98AC",
-                    background: d >= 5 ? "#3A3418" : "transparent", minWidth: 78 }}>{n}</th>
+                    background: d >= 5 ? "#3A3418" : "#161F2E", minWidth: 78, position: "sticky", top: 0, zIndex: 2 }}>{n}</th>
                 ))}
-                <th style={{ padding: "4px 8px", color: "#8B98AC" }}>Parität</th>
-                <th style={{ padding: "4px 8px", color: "#8B98AC" }}>AZ</th>
+                <th style={{ padding: "4px 8px", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>Parität</th>
+                <th style={{ padding: "4px 8px", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>AZ</th>
               </tr>
             </thead>
             <tbody>

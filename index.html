@@ -764,17 +764,17 @@ function RahmenplanWerkstatt() {
           <button onClick={exportAsPdf} style={styles.btn}>Als PDF exportieren (Querformat)</button>
         </div>
 
-        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "60vh", ...styles.panel }}>
+        <div style={{ overflowX: "auto", ...styles.panel }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
             <thead>
               <tr>
-                <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>Woche</th>
+                <th style={{ padding: "4px 8px", textAlign: "left", color: "#8B98AC" }}>Woche</th>
                 {WEEKDAY_NAMES.map((n, d) => (
                   <th key={n} style={{ padding: "6px 8px", color: d >= 5 ? "#3A3418" : "#8B98AC",
-                    background: d >= 5 ? "#3A3418" : "#161F2E", minWidth: 78, position: "sticky", top: 0, zIndex: 2 }}>{n}</th>
+                    background: d >= 5 ? "#3A3418" : "transparent", minWidth: 78 }}>{n}</th>
                 ))}
-                <th style={{ padding: "4px 8px", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>Parität</th>
-                <th style={{ padding: "4px 8px", color: "#8B98AC", position: "sticky", top: 0, background: "#161F2E", zIndex: 2 }}>AZ</th>
+                <th style={{ padding: "4px 8px", color: "#8B98AC" }}>Parität</th>
+                <th style={{ padding: "4px 8px", color: "#8B98AC" }}>AZ</th>
               </tr>
             </thead>
             <tbody>

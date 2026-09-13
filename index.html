@@ -69,6 +69,8 @@ const CODES = {
   "LT5": { label: "Tag Samstag",        start: 12,   end: 20   },
   "LT4": { label: "Tag Sonntag",        start: 9,    end: 17   },
   "LT6": { label: "Tag Sonntag",        start: 10,   end: 18   },
+  "SPR-F": { label: "Springer Früh (Platzhalter)", start: 6,  end: 14 },
+  "SPR-S": { label: "Springer Spät (Platzhalter)", start: 13, end: 22 },
 };
 
 const WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -82,6 +84,13 @@ const DURATION = {
   "LS5": 8, "LS6": 8, "LS1": 8, "LS2": 8,
   "LN5": 8, "LN6": 8.5, "LN1": 8,
   "LT1": 8, "LT2": 8, "LT3": 8, "LT5": 8, "LT4": 8, "LT6": 8,
+  "SPR-F": 8, "SPR-S": 8,
+};
+// Welche konkreten Bedarfe ein Springer platzhalterhaft abdecken kann
+// (Naechte bewusst ausgenommen)
+const SPRINGER_GRUPPEN = {
+  "SPR-F": ["LF5", "LF2", "LF1", "LF6"],
+  "SPR-S": ["LS5", "LS2", "LS1", "LS6"],
 };
 const SOLL_WOCHENARBEITSZEIT = 38.5; // BV Arbeitszeit ILS, Paragraph 2 Abs. 1
 const SOLL_TOLERANZ = 0.5; // +/- Stunden, innerhalb dessen "im Soll" gilt
@@ -116,6 +125,11 @@ function codePoolFor(planKey, dayType) {
   groups.forEach((g) => OWN_CODES[g][dayType].forEach((c) => set.add(c)));
   set.add(dayType === "wd" ? "ARL" : "AL");
   set.add(".");
+  // Springer-Platzhalter fuer Disponent und Schichtfuehrung (keine Naechte)
+  if (planKey === "RFP" || planKey === "SF") {
+    set.add("SPR-F");
+    set.add("SPR-S");
+  }
   return Array.from(set);
 }
 
@@ -289,7 +303,24 @@ function computeCombinedCoverage(grids) {
       Object.keys(required).forEach((code) => {
         counts[code] = usedCountAcrossPlans(grids, d, parity, code, null, null);
       });
-      result[parity].push({ day: d, required, counts });
+
+      // Springer-Ausgleich: wie viele Fruehdienst-/Spaetdienst-Luecken bleiben
+      // uebrig, NACHDEM Springer-Platzhalter (SPR-F/SPR-S) sie aufgefuellt haben.
+      const springer = {};
+      Object.entries(SPRINGER_GRUPPEN).forEach(([springerCode, gruppe]) => {
+        let deficitVorher = 0;
+        gruppe.forEach((code) => {
+          if (code in required) deficitVorher += Math.max(0, required[code] - (counts[code] || 0));
+        });
+        const anzahlSpringer = usedCountAcrossPlans(grids, d, parity, springerCode, null, null);
+        springer[springerCode] = {
+          deficitVorher,
+          anzahlSpringer,
+          deficitNachher: Math.max(0, deficitVorher - anzahlSpringer),
+        };
+      });
+
+      result[parity].push({ day: d, required, counts, springer });
     }
   });
   return result;
@@ -746,6 +777,41 @@ function RahmenplanWerkstatt() {
                               <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
                                 color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
                                 {have}/{need}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        <tr style={{ borderTop: "2px solid #2A3446" }}>
+                          <td colSpan={8} style={{ padding: "6px 8px", fontSize: 12, color: "#8B98AC", fontStyle: "italic" }}>
+                            Springer-Ausgleich (Platzhalter deckt fehlende Früh-/Spätdienste ab, egal welchen genau):
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: "5px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>Früh offen</td>
+                          {dayEntries.map(({ day, springer }) => {
+                            const weekend = day >= 5;
+                            const s = springer["SPR-F"];
+                            const ok = s.deficitNachher === 0;
+                            return (
+                              <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
+                                color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
+                                {s.deficitNachher}
+                                <span style={{ color: "#4C5A70", fontSize: 11 }}> ({s.deficitVorher}−{s.anzahlSpringer}⚡)</span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        <tr>
+                          <td style={{ padding: "5px 8px", fontFamily: "monospace", color: "#DCE7FF", fontWeight: 600 }}>Spät offen</td>
+                          {dayEntries.map(({ day, springer }) => {
+                            const weekend = day >= 5;
+                            const s = springer["SPR-S"];
+                            const ok = s.deficitNachher === 0;
+                            return (
+                              <td key={day} style={{ padding: "5px 6px", textAlign: "center", fontFamily: "monospace",
+                                color: ok ? "#8FE3A6" : "#F0A8A8", background: weekend ? "#211E10" : "transparent" }}>
+                                {s.deficitNachher}
+                                <span style={{ color: "#4C5A70", fontSize: 11 }}> ({s.deficitVorher}−{s.anzahlSpringer}⚡)</span>
                               </td>
                             );
                           })}
